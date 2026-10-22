@@ -98,6 +98,53 @@ test('markUsed only counts ids that exist', () => {
   assert.equal(meta.get('e-nope'), undefined)
 })
 
+test('migrate follows an id rename: counters move, no orphan + new row', () => {
+  const { meta } = metaAt()
+  meta.sync(chunksOf([
+    { target: 'memory', path: 'MEMORY.md', text: '<!-- dsh-mem id="e-old" tags="" -->\n旧文本\n<!-- /dsh-mem -->' },
+  ]), { now: NOW - 5 * DAY })
+  meta.markUsed(['e-old'], { now: NOW - DAY })
+  meta.setPinned('e-old', true)
+
+  const moved = meta.migrate('e-old', 'e-new')
+  assert.equal(moved.id, 'e-new')
+  assert.equal(moved.useCount, 1)
+  assert.equal(moved.lastUsedAt, NOW - DAY)
+  assert.equal(moved.pinned, true)
+  assert.equal(meta.get('e-old'), undefined, '旧 id 不该留下 orphan 行')
+  assert.equal(meta.get('e-new').orphanedAt, null)
+})
+
+test('migrate merges into an existing row, replace overwrites a deleted one', () => {
+  const { meta } = metaAt()
+  meta.sync(chunksOf([
+    { target: 'memory', path: 'MEMORY.md', text: '- 同\n- 同\n' },
+  ]), { now: NOW - DAY })
+  const ids = chunksOf([{ target: 'memory', path: 'MEMORY.md', text: '- 同\n- 同\n' }]).map((chunk) => chunk.id)
+  assert.equal(ids.length, 2)
+  assert.notEqual(ids[0], ids[1])
+  meta.markUsed([ids[0]], { now: NOW - 2 * DAY })
+  meta.markUsed([ids[1]], { now: NOW - DAY })
+
+  // Plain merge: both rows stay accounted for under the destination id.
+  const merged = meta.migrate(ids[1], ids[0])
+  assert.equal(merged.useCount, 2)
+  assert.equal(merged.lastUsedAt, NOW - DAY)
+  assert.equal(meta.get(ids[1]), undefined)
+
+  // replace: the destination row belonged to a just-deleted entry — drop it.
+  meta.sync(chunksOf([
+    { target: 'memory', path: 'MEMORY.md', text: '- 甲\n- 乙\n' },
+  ]), { now: NOW })
+  const pair = chunksOf([{ target: 'memory', path: 'MEMORY.md', text: '- 甲\n- 乙\n' }]).map((chunk) => chunk.id)
+  meta.markUsed([pair[0]], { now: NOW - 3 * DAY })
+  meta.markUsed([pair[1]], { now: NOW - DAY })
+  const replaced = meta.migrate(pair[1], pair[0], { replace: true })
+  assert.equal(replaced.useCount, 1)
+  assert.equal(replaced.lastUsedAt, NOW - DAY)
+  assert.equal(meta.get(pair[1]), undefined)
+})
+
 test('markdown hand edits realign metadata through the store corpus', async () => {
   const root = await mkdtemp(join(tmpdir(), 'dsh-memory-meta-'))
   const store = createStore({ root, idFactory: () => 'e-fixed' })

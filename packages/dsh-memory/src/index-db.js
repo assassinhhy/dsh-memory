@@ -2,41 +2,35 @@
  * Plugin-owned index. Markdown remains the source of truth; this file is a
  * rebuildable FTS5 trigram + vector cache. node:sqlite ships with the dsh
  * Node runtime and has FTS5 trigram (verified on Node 26 / Windows x64).
+ *
+ * M3: chunks are the same `l-…` / `p-…` / `e-…` entries list and entry_meta
+ * use (shared `splitProse` numbering), so one id means the same thing
+ * everywhere. SCHEMA_VERSION 2 forces a rebuild of old indexes.
  */
 import { createHash } from 'node:crypto'
 import { mkdir } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { rankHits } from './decay.js'
-import { parseDocument } from './document.js'
+import { listItems } from './document.js'
 import { createMetaStore } from './meta.js'
 import { cosine, ftsPhrase, rrfMerge } from './search.js'
 
-export const SCHEMA_VERSION = 1
+export const SCHEMA_VERSION = 2
 
 function hashText(text) {
   return createHash('sha256').update(text).digest('hex')
 }
 
-export function proseId(text) {
-  return `p-${hashText(text).slice(0, 10)}`
-}
-
 export function chunksFrom(target, path, raw) {
-  const chunks = []
-  const push = (entryId, text, tags) => {
-    chunks.push({ id: `${target}:${entryId}`, entryId, target, path, text, tags })
-  }
-  for (const segment of parseDocument(raw)) {
-    if (segment.type === 'entry') {
-      const text = segment.text.trim()
-      if (text !== '') push(segment.id, text, segment.tags)
-      continue
-    }
-    const blocks = segment.text.split(/\n{2,}/u).map((block) => block.trim()).filter(Boolean)
-    for (const block of blocks) push(proseId(block), block, '')
-  }
-  return chunks
+  return listItems(raw).map((item) => ({
+    id: `${target}:${item.id}`,
+    entryId: item.id,
+    target,
+    path,
+    text: item.text,
+    tags: item.tags,
+  }))
 }
 
 function blob(vector) {
