@@ -7,6 +7,7 @@ import { join } from 'node:path'
 import { DEFAULT_HALF_LIFE_DAYS, DEFAULT_USE_BOOST, decayScore, toMs } from './decay.js'
 import { createEmbedder } from './embed.js'
 import { chunksFrom, createIndex } from './index-db.js'
+import { detectKeyFact } from './keyfact.js'
 import { fileFor } from './paths.js'
 import { createStore } from './store.js'
 
@@ -23,7 +24,14 @@ export function createRuntime(options) {
   const root = options.root
   const logger = options.logger ?? console
   const nowFn = options.now ?? (() => new Date())
-  const store = createStore({ root, now: nowFn, tz: options.tz, idFactory: options.idFactory })
+  const store = createStore({
+    root,
+    now: nowFn,
+    tz: options.tz,
+    idFactory: options.idFactory,
+    // Over-limit planning wants pin state: longest-unused first, pinned never suggested.
+    getMeta: (id) => index?.meta?.get?.(id),
+  })
   const embedder = options.embedder ?? createEmbedder({
     cacheDir: join(root, 'models'),
     proxy: options.proxy,
@@ -64,6 +72,63 @@ export function createRuntime(options) {
       if ((listed.entries ?? []).some((entry) => entry.id === id)) return target
     }
     return undefined
+  }
+
+  /**
+   * Order renames so an id is vacated before anything moves into it. A rewrite
+   * that lands on a sibling's id (`l-aaa` → `l-foo` while `l-foo` → `l-foo~2`)
+   * would otherwise merge the two rows and hand the counters to the sibling.
+   */
+  function orderRenames(renames) {
+    const pending = renames.filter(([from, to]) => from && to && from !== to)
+    const bySource = new Map()
+    for (const rename of pending) if (!bySource.has(rename[0])) bySource.set(rename[0], rename)
+    const seen = new Set()
+    const ordered = []
+    const visit = (rename, stack) => {
+      const key = `${rename[0]}>${rename[1]}`
+      if (seen.has(key) || stack.has(key)) return
+      stack.add(key)
+      const blocker = bySource.get(rename[1])
+      if (blocker) visit(blocker, stack)
+      stack.delete(key)
+      if (seen.has(key)) return
+      seen.add(key)
+      ordered.push(rename)
+    }
+    for (const rename of pending) visit(rename, new Set())
+    return ordered
+  }
+
+  /**
+   * Migrate entry_meta across id renames before the index re-syncs. A rename
+   * into a just-deleted id (remove of the first of two identical items) replaces
+   * the destination row instead of merging with it.
+   */
+  function applyRenames(renames, staleIds) {
+    if (!index || !Array.isArray(renames)) return
+    const stale = new Set((staleIds ?? []).map(String))
+    for (const [from, to] of orderRenames(renames)) {
+      index.meta.migrate(from, to, { now: toMs(nowFn()), replace: stale.has(to) })
+    }
+  }
+
+  /**
+   * Stable environment facts (host / port / path / url / ip / account) are worth
+   * keeping — *suggest* pinning them, never pin automatically. USER.md rows are
+   * pinned by default, so this mostly fires for MEMORY.md.
+   */
+  function suggestPinFor(result) {
+    if (!result?.ok || !result.id) return undefined
+    const file = result.target
+    if (file !== 'user' && file !== 'memory') return undefined
+    const text = result.entry?.text ?? result.text ?? ''
+    const { kinds } = detectKeyFact(text)
+    if (kinds.length === 0) return undefined
+    const row = index?.meta?.get?.(result.id)
+    const pinned = row?.pinned ?? file === 'user'
+    if (pinned) return undefined
+    return { id: result.id, kinds }
   }
 
   async function backfill() {
@@ -122,7 +187,11 @@ export function createRuntime(options) {
     add(input) {
       return locked(async () => {
         const result = await store.add(input)
-        if (result.ok) await sync()
+        if (result.ok) {
+          await sync()
+          const suggestPin = suggestPinFor(result)
+          if (suggestPin) result.suggestPin = suggestPin
+        }
         return result
       })
     },
@@ -130,9 +199,12 @@ export function createRuntime(options) {
       return locked(async () => {
         const result = await store.replace(input)
         if (result.ok) {
-          // Edited via memory_replace counts as "used".
+          // Counters follow the id rename; edited via memory_replace counts as "used".
+          applyRenames(result.renames)
           if (result.id && index) index.meta.markUsed([result.id], { now: toMs(nowFn()) })
           await sync()
+          const suggestPin = suggestPinFor(result)
+          if (suggestPin) result.suggestPin = suggestPin
         }
         return result
       })
@@ -140,12 +212,34 @@ export function createRuntime(options) {
     remove(input) {
       return locked(async () => {
         const result = await store.remove(input)
-        if (result.ok) await sync()
+        if (result.ok) {
+          // A renumbered duplicate keeps its metadata under the surviving id.
+          applyRenames(result.renames, result.removedIds)
+          await sync()
+        }
         return result
       })
     },
     list(target) {
-      return store.list(target)
+      return store.list(target).then((listed) => {
+        const decorate = (entry, file) => {
+          if (!entry?.id || entry.id === 'unfenced') return entry
+          const row = index?.meta?.get?.(entry.id)
+          return {
+            ...entry,
+            pinned: row?.pinned ?? file === 'user',
+            useCount: row?.useCount ?? 0,
+          }
+        }
+        if (listed.entries) return { ...listed, entries: listed.entries.map((entry) => decorate(entry, listed.target)) }
+        if (listed.files) {
+          return {
+            ...listed,
+            files: listed.files.map((file) => ({ ...file, entries: (file.entries ?? []).map((entry) => decorate(entry, file.target)) })),
+          }
+        }
+        return listed
+      })
     },
     /** Archive is reversible: the entry moves to archive/YYYY-MM.md, never deleted. */
     archive({ id, reason }) {
