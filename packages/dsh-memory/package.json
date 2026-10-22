@@ -1,0 +1,42 @@
+{
+  "name": "dsh-memory",
+  "version": "0.1.0",
+  "description": "有界常驻记忆：USER/MEMORY Markdown、日记、FTS5 + 本地 bge-m3，会话开头冻结注入",
+  "license": "MIT",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": { "default": "./lib/client.js" },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "src",
+    "cordis.patch.yml",
+    "lib/client.js"
+  ],
+  "engines": {
+    "dsh": ">=0.2.1-0 <0.3.0"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "^3.7.0",
+    "undici": "^7.16.0"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "*",
+    "@deepseek-ai/schemastery": "*",
+    "@deepseek-ai/dsh-tools": "*"
+  },
+  "dsh": {
+    "bundle": { "patch": "./cordis.patch.yml" },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-ui-renderer"
+      ]
+    }
+  }
+}

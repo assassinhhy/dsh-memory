@@ -1,0 +1,13 @@
+# Layer contributed when a profile lists this bundle (dsh plugin add).
+# Base and web leave session full-text search off (openAt: never). This later
+# layer turns it on so session_search can read ~/.dsh/sessions JSONL through
+# the shipped sessionQuery engine. A profile cordis.patch.yml that restates
+# this row still wins. The whole config is replaced, so both keys are restated.
+- id: session-query-sqlite
+  config:
+    path: !!js dshHomePath('memory/session-index.sqlite')
+    openAt: first-search
+
+- insert:
+    - id: dsh-memory
+      name: dsh-memory
