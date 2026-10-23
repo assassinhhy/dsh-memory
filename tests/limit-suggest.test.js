@@ -138,7 +138,7 @@ test('over-limit write is refused whole, with groups and an estimate — the fil
   const store = createStore({ root, idFactory: () => 'e-big01' })
   const before = (await store.list('memory')).entries.map((entry) => entry.id)
 
-  const denied = await store.add({ target: 'memory', text: '新'.repeat(4000) })
+  const denied = await store.add({ target: 'memory', text: '新'.repeat(8000) })
   assert.equal(denied.ok, false)
   assert.equal(denied.code, 'over_limit')
   assert.match(denied.error, /没有截断/)

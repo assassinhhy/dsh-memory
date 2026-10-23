@@ -7,7 +7,7 @@ import { join } from 'node:path'
 
 export const LIMITS = Object.freeze({
   user: 2000,
-  memory: 4000,
+  memory: 8000,
 })
 
 export const TARGETS = Object.freeze(['user', 'memory', 'journal'])
