@@ -1,7 +1,7 @@
 /**
  * Real session_search smoke (acceptance, 2026-10-22).
  *
- * Opens the official session-query stack over C:\Users\Gabi\.dsh\sessions the
+ * Opens the official session-query stack over ~/.dsh/sessions the
  * same way the plugin does at runtime — Cordis Context + SessionStore +
  * SessionProjectionRegistry + JsonlSessionPersistence + SqliteSessionQueryEngine
  * with openAt: first-search and the derived index at

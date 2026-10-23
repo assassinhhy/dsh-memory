@@ -1,7 +1,7 @@
-﻿# NOTES.md — 运行时补充（拉姆）
+# NOTES.md — 运行时补充（拉姆）
 
-- 2026-10-22：人格已定为「贝蒂」；`C:\Users\Gabi\.dsh\AGENTS.md` 已是契约精灵人设（叫主人、有个性、会纠正）。**禁止覆盖/改写 AGENTS.md 的人格部分。**
-- 已预置种子：`C:\Users\Gabi\.dsh\memory\USER.md`、`MEMORY.md`。插件应读取这些路径；可扩充，不要清空重写成空壳。
+- 2026-10-22：人格已定为「贝蒂」；`~/.dsh/AGENTS.md` 已是契约精灵人设（叫主人、有个性、会纠正）。**禁止覆盖/改写 AGENTS.md 的人格部分。**
+- 已预置种子：`~/.dsh/memory/USER.md`、`MEMORY.md`。插件应读取这些路径；可扩充，不要清空重写成空壳。
 - 其余仍以 CLAUDE_TASK_M1.md 为准。
 
 ## 实现取舍（2026-10-22）
