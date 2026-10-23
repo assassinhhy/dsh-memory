@@ -45,7 +45,7 @@ Hermes 式有界常驻核 + OpenClaw 式 Markdown 分层。全文以 Markdown �
 
 已有的 `USER.md` / `MEMORY.md` 种子不会被清空。工具只追加带 id 的条目，或按你指定的 id / 锚点改删。手改 Markdown 合法，**下一次新会话**才进入提示词。本会话里的快照不变，以免打掉 prompt cache。
 
-条目标记：
+条目模型：每个 `- ` / `* ` / `+ ` 列表项（含更深缩进的续行和子项）是一条独立条目，id 形如 `l-xxxxxxxxxx`；其余散文按空行分成块，id 形如 `p-xxxxxxxxxx`；工具写入的条目带 `dsh-mem` 标记，id 形如 `e-xxxxxxxx`：
 
 ```markdown
 <!-- dsh-mem id="e-1a2b3c4d" tags="tooling" -->
@@ -53,23 +53,31 @@ Hermes 式有界常驻核 + OpenClaw 式 Markdown 分层。全文以 Markdown �
 <!-- /dsh-mem -->
 ```
 
-没有标记的原文会在 `memory_list` 里显示为 `unfenced`，可以整段替换，不会在读取时被改写。
+`l-` / `p-` 是**内容哈希**（规范化文本的 sha256 前 10 位）：插入、删除、改写**别的**条目都不影响它的 id。同一文档里重复文本用后缀区分（`l-xxxx` 与 `l-xxxx~2`）。改写某条后它自己的 id 会跟着内容变，返回里会给 `id=旧 → 新`；使用计数、置顶等元数据跟着迁移，不会变成孤儿行。**只有改到的那条换字节，其余原样不动。**
+
+`memory_list` 一行一条：`- l-… [item] 12字 📌 预览`。
+
+遗留别名 `unfenced` 仍可整段替换未标记正文（v0.1.0 语义，会按标记条目重组文件）；日常请改用 `l-` / `p-` id，那样更精准。
 
 ## 工具
 
 | 工具 | 作用 |
 |---|---|
-| `memory_add` | 写入 user / memory / journal |
-| `memory_replace` | 按 id 或唯一原文锚点修改。改动算「用过」 |
-| `memory_remove` | 删除 |
-| `memory_list` | 列出常驻条目、字符占用和元数据 |
-| `memory_search` | FTS5 trigram + 本地 bge-m3，RRF 融合后按衰减重排。含日记，结果带 `score` / `last_used` |
+| `memory_add` | 写入 user / memory / journal。返回 id、受影响条目和改动 diff |
+| `memory_replace` | 按 id 或唯一原文锚点修改。返回 `id=旧 → 新` 和 diff。改动算「用过」 |
+| `memory_remove` | 删除。返回被删 id、受影响条目和 diff |
+| `memory_list` | 一行一条（`l-` / `p-` / `e-` id、字数、置顶、预览），外加字符占用 |
+| `memory_search` | FTS5 trigram + 本地 bge-m3，RRF 融合后按衰减重排。含日记，id 与 list 一致，结果带 `score` / `last_used` |
 | `memory_pin` | 置顶 / 取消置顶（`USER.md` 条目默认置顶） |
 | `memory_consolidate` | 立刻跑一次周整理 |
 | `memory_reindex` | 从 Markdown 重建索引 |
 | `session_search` | 包装 `ctx.sessionQuery`。同一工作区，不含本会话 |
 
-超限返回明确错误和建议删除的长条目，**不截断**。检测到密钥、token、密码赋值会拒绝写入，错误信息不回显密钥。
+写操作的返回都带 `id`（替换带旧→新）、`affectedIds` 和一段只覆盖受影响条目的 unified diff（过长会截断并注明）。任何成功路径都不会出现 `id=null`。
+
+写入主机名、端口、路径、域名、IP、账号这类**稳定关键事实**后，如果目标条目还没置顶，会多一行 `💡 像是稳定关键事实（端口/路径…），建议 memory_pin id=…`。只是建议，**不会自动置顶**；密钥/token 不算关键事实（本来就会被脱敏拒绝）。
+
+超限**整次拒绝且不截断**，并给出三组具体建议（每组带 id、字数、预览、原因）：挪去日记（一次性事件/进度/日期叙事）、合并相似（三元组 Jaccard）、精简最长；结尾估算「挪走这些后可释放约 N 字，足以写入本次 M 字」。置顶条目不会被建议挪走，正在写的那条也不会。**只建议，不自动删除/合并/挪动。** 检测到密钥、token、密码赋值会拒绝写入，错误信息不回显密钥。
 
 `session_search` 不自建会话 FTS。插件补丁把 `session-query-sqlite` 的 `openAt` 从 `never` 改成 `first-search`，这样能搜到 `~/.dsh/sessions` 里的旧 JSONL。权限与官方工具一致：没有 cwd 不能跨会话；目标会话必须属于当前工作区。若 profile 自己的 `cordis.patch.yml` 又把该行改回 `never`，以那边为准，工具会说明原因。
 
@@ -117,11 +125,12 @@ decay = 0.5 ^ (距上次使用的天数 / 半衰期)
 
 ```powershell
 node --test tests/*.test.js
+node scripts/smoke-memory.mjs
 node scripts/smoke-m2.mjs
 ```
 
-覆盖字符上限、脱敏、快照冻结、检索融合排序、工作区权限边界、衰减公式与置顶不衰减、使用计数、md 手改后元数据对齐、整理建议 schema、置顶不进 stale、归档可恢复、超限拒绝。不写真实的 `~\.dsh\memory`（冒烟脚本跑完还会核对正式文件字节不变）。
+覆盖字符上限、脱敏、快照冻结、检索融合排序、工作区权限边界、衰减公式与置顶不衰减、使用计数、md 手改后元数据对齐、整理建议 schema、置顶不进 stale、归档可恢复、超限拒绝，以及条目模型（split 规则、id 稳定性、`l-` 字节级改删、锚点返回非空 id、diff 内容、元数据迁移、list/search id 一致、`unfenced` 兼容）、稳定关键事实识别与置顶建议、超限分组建议与释放估算。不写真实的 `~\.dsh\memory`（冒烟脚本跑完还会核对正式文件字节不变）。
 
 ## 不做
 
-Dreaming、知识图谱、每条消息抽取、云端 embedding、自动晋升、自动删除。
+Dreaming、知识图谱、每条消息抽取、云端 embedding、自动晋升、自动删除、自动置顶、自动合并、超限自动腾挪。

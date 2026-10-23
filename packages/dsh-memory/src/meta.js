@@ -88,6 +88,17 @@ export function createMetaStore(db, options = {}) {
   const bumpUse = db.prepare('UPDATE entry_meta SET last_used_at = ?, use_count = use_count + 1 WHERE id = ?')
   const setPin = db.prepare('UPDATE entry_meta SET pinned = ? WHERE id = ?')
   const setArchive = db.prepare('UPDATE entry_meta SET archived_at = ? WHERE id = ?')
+  const deleteRow = db.prepare('DELETE FROM entry_meta WHERE id = ?')
+  const moveRow = db.prepare(`
+    UPDATE entry_meta SET id = ?, file = ?, created_at = ?, last_used_at = ?, use_count = ?,
+      pinned = ?, archived_at = ?, orphaned_at = ?, last_seen_hash = ?
+    WHERE id = ?
+  `)
+  const mergeRow = db.prepare(`
+    UPDATE entry_meta SET file = ?, created_at = ?, last_used_at = ?, use_count = ?,
+      pinned = ?, archived_at = ?, orphaned_at = NULL, last_seen_hash = ?
+    WHERE id = ?
+  `)
   const kvSelect = db.prepare('SELECT value FROM meta WHERE key = ?')
   const kvUpsert = db.prepare(`
     INSERT INTO meta (key, value) VALUES (?, ?)
@@ -197,6 +208,69 @@ export function createMetaStore(db, options = {}) {
 
     get(id) {
       return rowToMeta(getRow.get(String(id)))
+    },
+
+    /**
+     * Follow an id rename (replace rewrites a content-hash id, remove renumbers
+     * a duplicate). Counters move from `from` to `to` — never an orphan plus a
+     * fresh row. When both rows exist they are merged (use_count summed,
+     * last_used_at kept, pinned OR'd) and `from` is dropped. `opts.replace`
+     * drops a destination row that belongs to a just-deleted entry (remove of
+     * the first of two identical items: the survivor takes over its id).
+     */
+    migrate(from, to, opts = {}) {
+      const src = String(from)
+      const dst = String(to)
+      if (!src || !dst || src === dst) return undefined
+      const source = rowToMeta(getRow.get(src))
+      const target = rowToMeta(getRow.get(dst))
+      if (!source) return target
+      const seenAt = toMs(opts.now) ?? toMs(now())
+      db.exec('BEGIN')
+      try {
+        if (!target || opts.replace) {
+          if (target) deleteRow.run(dst)
+          moveRow.run(
+            dst,
+            source.file,
+            source.createdAt ?? seenAt,
+            source.lastUsedAt,
+            source.useCount,
+            source.pinned ? 1 : 0,
+            source.archivedAt,
+            null,
+            source.lastSeenHash,
+            src,
+          )
+        } else {
+          const pinned = source.pinned || target.pinned ? 1 : 0
+          const createdAt = source.createdAt == null ? target.createdAt
+            : target.createdAt == null ? source.createdAt
+            : Math.min(source.createdAt, target.createdAt)
+          const lastUsedAt = source.lastUsedAt == null ? target.lastUsedAt
+            : target.lastUsedAt == null ? source.lastUsedAt
+            : Math.max(source.lastUsedAt, target.lastUsedAt)
+          const archivedAt = source.archivedAt == null ? target.archivedAt
+            : target.archivedAt == null ? source.archivedAt
+            : Math.min(source.archivedAt, target.archivedAt)
+          mergeRow.run(
+            target.file,
+            createdAt ?? seenAt,
+            lastUsedAt,
+            source.useCount + target.useCount,
+            pinned,
+            archivedAt,
+            target.lastSeenHash,
+            dst,
+          )
+        }
+        deleteRow.run(src)
+        db.exec('COMMIT')
+      } catch (error) {
+        db.exec('ROLLBACK')
+        throw error
+      }
+      return rowToMeta(getRow.get(dst))
     },
 
     /** Live rows only (not archived, not orphaned). */

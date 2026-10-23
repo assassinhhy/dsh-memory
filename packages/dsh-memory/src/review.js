@@ -2,6 +2,10 @@
  * Background review. Every N completed turns the host may ask the current model
  * for one ADD / UPDATE / DELETE / NOOP. Parsing failures become NOOP — a bad
  * model reply must never throw into the conversation.
+ *
+ * A DELETE decision is a soft delete: it archives the entry (recoverable),
+ * never removes it. Only the explicit memory_remove tool / HTTP DELETE may hard
+ * delete.
  */
 
 export const ACTIONS = Object.freeze(['ADD', 'UPDATE', 'DELETE', 'NOOP'])
@@ -12,8 +16,9 @@ const SYSTEM = `你是本地记忆维护员。只根据给定对话，决定要�
 - 不要保存密钥、token、密码、一次性问答、闲聊、已经写在 USER.md / MEMORY.md 里的内容。
 - 拿不准就 NOOP。不要为了“有所作为”而写入。
 - 用户画像、称呼、禁忌写入 target=user；环境与项目约定写入 target=memory；当天发生的具体事件写入 target=journal。
+- action=DELETE 表示把一条记忆移入归档（archive/YYYY-MM.md），可恢复，不是永久删除。只有确定它过时或错误时才用；拿不准就 NOOP。DELETE 必须给 id 或 anchor。
 - 只输出一个 JSON 对象，不要 markdown 围栏，不要解释。
-字段：action (ADD|UPDATE|DELETE|NOOP), target (user|memory|journal), id (可选), anchor (可选，条目里的唯一原文片段), text (ADD/UPDATE 必填), tags (可选，逗号分隔)。`
+字段：action (ADD|UPDATE|DELETE|NOOP), target (user|memory|journal), id (可选), anchor (可选，条目里的唯一原文片段), text (ADD/UPDATE 必填), tags (可选，逗号分隔)。DELETE 需要 id 或 anchor。`
 
 export function createReviewScheduler({ every = 6 } = {}) {
   const n = Number(every)
@@ -114,7 +119,20 @@ export async function applyReviewDecision(store, decision) {
     })
   }
   if (decision.action === 'DELETE') {
-    return store.remove({ target: decision.target, id: decision.id, anchor: decision.anchor })
+    // DELETE is a soft delete: move the entry to archive/YYYY-MM.md. Never fall
+    // back to store.remove() — an auto-review must stay recoverable.
+    if (typeof store?.archive !== 'function') {
+      return { ok: false, code: 'no_archive', error: '当前存储不支持可恢复归档，已拒绝 DELETE；不会回退到硬删除。' }
+    }
+    if (!decision.id && !decision.anchor) {
+      return { ok: false, code: 'no_locator', error: 'DELETE 需要 id 或唯一原文锚点。' }
+    }
+    const result = await store.archive({
+      ...(decision.id ? { id: decision.id } : { anchor: decision.anchor }),
+      ...(decision.target ? { target: decision.target } : {}),
+      reason: 'auto-review',
+    })
+    return result?.ok ? { ...result, applied: 'ARCHIVED' } : result
   }
   return { ok: true, applied: 'NOOP' }
 }

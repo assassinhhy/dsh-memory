@@ -279,7 +279,7 @@ export function createConsolidation(options) {
     const entries = []
     const take = (file, items) => {
       for (const item of items ?? []) {
-        if (item.kind !== 'entry') continue
+        if (!item.id || item.id === 'unfenced') continue
         const row = metaById.get(item.id)
         entries.push({
           id: item.id,

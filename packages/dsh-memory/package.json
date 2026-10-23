@@ -1,6 +1,6 @@
 {
   "name": "dsh-memory",
-  "version": "0.1.0",
+  "version": "0.2.1",
   "description": "有界常驻记忆：USER/MEMORY Markdown、日记、FTS5 + 本地 bge-m3，会话开头冻结注入",
   "license": "MIT",
   "type": "module",
