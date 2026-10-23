@@ -242,12 +242,14 @@ export function createRuntime(options) {
       })
     },
     /** Archive is reversible: the entry moves to archive/YYYY-MM.md, never deleted. */
-    archive({ id, reason }) {
+    archive({ id, anchor, target, reason }) {
       return locked(async () => {
         await ready
-        const result = await store.archive({ id, reason })
+        const result = await store.archive({ id, anchor, target, reason })
         if (result.ok && index) {
-          index.meta.setArchived(id, toMs(nowFn()))
+          // Removing an l-/p- duplicate can renumber a sibling into its id.
+          applyRenames(result.renames, result.removedIds)
+          index.meta.setArchived(result.id, toMs(nowFn()))
           await sync()
         }
         return result
@@ -258,7 +260,14 @@ export function createRuntime(options) {
         await ready
         const result = await store.restore({ id })
         if (result.ok && index) {
-          index.meta.setArchived(id, null)
+          const restoredId = result.restoredId ?? result.id
+          if (restoredId !== result.id) {
+            // A duplicate suffix can change on restore; carry metadata over.
+            index.meta.migrate(result.id, restoredId)
+            index.meta.setArchived(restoredId, null)
+          } else {
+            index.meta.setArchived(result.id, null)
+          }
           await sync()
         }
         return result

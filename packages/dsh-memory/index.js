@@ -13,7 +13,7 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 import { createConsolidation } from './src/consolidate.js'
 import { formatList, formatRemove, formatSearch, formatWrite } from './src/format.js'
 import { fileFor, resolveMemoryRoot, zonedStamp } from './src/paths.js'
-import { buildReviewMessages, createReviewScheduler, parseReviewDecision, transcriptFromMessages } from './src/review.js'
+import { applyReviewDecision, buildReviewMessages, createReviewScheduler, parseReviewDecision, transcriptFromMessages } from './src/review.js'
 import { createRuntime } from './src/runtime.js'
 import { callerFromExec, formatSessionHits, runSessionSearch } from './src/session-search.js'
 import { createSnapshotCache, renderMemoryPrompt } from './src/snapshot.js'
@@ -290,18 +290,9 @@ export function apply(ctx, config) {
     }
   }
 
+  /** Auto-review decisions run through the runtime so DELETE archives (never hard-deletes). */
   async function applyDecision(decision) {
-    if (!decision || decision.action === 'NOOP') return { ok: true, applied: 'NOOP' }
-    if (decision.action === 'ADD') return runtime.add({ target: decision.target, text: decision.text, tags: decision.tags })
-    if (decision.action === 'UPDATE') return runtime.replace({
-      target: decision.target,
-      id: decision.id,
-      anchor: decision.anchor,
-      text: decision.text,
-      tags: decision.tags,
-    })
-    if (decision.action === 'DELETE') return runtime.remove({ target: decision.target, id: decision.id, anchor: decision.anchor })
-    return { ok: true, applied: 'NOOP' }
+    return applyReviewDecision(runtime, decision)
   }
 
   const register = (definition) => ctx.tools.register(defineTool(definition))

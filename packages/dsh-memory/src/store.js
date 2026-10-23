@@ -18,6 +18,7 @@ import { unifiedDiff } from './diff.js'
 import {
   SYNTHETIC_ID,
   appendEntry,
+  appendItem,
   eachItem,
   findAnchor,
   findEntrySpan,
@@ -25,6 +26,7 @@ import {
   itemsInRange,
   lineNumberAt,
   listItems,
+  normalizeItemBody,
   normalizeTags,
   removeAnchor,
   removeItem,
@@ -443,6 +445,28 @@ export function createStore(options = {}) {
     }
   }
 
+  /**
+   * What archive() should move: a marked `e-…` entry or an M3 `l-…` / `p-…`
+   * item. An anchor is accepted when it falls inside exactly one entry. The
+   * synthetic `unfenced` whole-prose alias is refused.
+   */
+  function resolveArchiveEntry(located, { id, anchor }) {
+    if (id) {
+      if (id === SYNTHETIC_ID || located.where === 'unfenced') {
+        return { error: fail('bad_id', '只能归档具体条目，不能归档整段未标记正文。') }
+      }
+      const item = eachItem(located.text).find((entry) => entry.id === id)
+      if (!item) return { error: fail('not_found', '没有找到要归档的条目。') }
+      return { item }
+    }
+    const span = findAnchor(located.text, anchor)
+    if (span === 'ambiguous') return { error: fail('ambiguous', '锚点匹配到多处。请改用 id。') }
+    if (span === undefined) return { error: fail('not_found', '没有找到要归档的条目。') }
+    const item = eachItem(located.text).find((entry) => entry.start <= span.start && entry.end >= span.end)
+    if (!item) return { error: fail('bad_id', '锚点没有落在一个可归档的条目里。') }
+    return { item }
+  }
+
   return {
     root,
     pathFor(target) {
@@ -594,19 +618,39 @@ export function createStore(options = {}) {
     },
 
     /**
-     * Move a marked entry out of its Markdown file into archive/YYYY-MM.md.
-     * Never a hard delete — restore() puts it back.
+     * Move an entry out of its Markdown file into archive/YYYY-MM.md.
+     * Never a hard delete — restore() puts it back. Accepts marked `e-…`
+     * entries and M3 `l-…` / `p-…` items, by id or unique anchor.
      */
-    archive({ id, reason }) {
+    archive({ id, anchor, target: onlyTarget, reason } = {}) {
       return locked(async () => {
-        if (!id || id === SYNTHETIC_ID) return fail('bad_id', '只能归档带 id 标记的条目。')
-        const located = await locateEntry(id)
+        if (!id && !anchor) return fail('bad_id', '归档需要 id 或唯一原文锚点。')
+        const located = id ? await locateEntry(id) : await locateAnchor(anchor)
+        if (located === 'ambiguous') return fail('ambiguous', '锚点匹配到多处。请改用 memory_list 里的 id。')
         if (!located) return fail('not_found', '没有找到要归档的条目。')
-        if (located.where !== 'entry') return fail('bad_id', '只能归档带 id 标记的条目。')
-        const item = listItems(located.text).find((entry) => entry.id === id)
-        if (!item) return fail('not_found', '没有找到要归档的条目。')
-        const next = removeMarked(located.text, id)
-        if (next === undefined) return fail('not_found', '没有找到要归档的条目。')
+        if (onlyTarget && located.target !== onlyTarget) return fail('not_found', `id 不在 ${onlyTarget} 里。`)
+        const resolved = resolveArchiveEntry(located, { id, anchor })
+        if (resolved.error) return resolved.error
+        const item = resolved.item
+        const beforeItems = eachItem(located.text)
+        let next
+        let affectedIds
+        let removedIds
+        let renames = []
+        if (item.kind === 'entry') {
+          next = removeMarked(located.text, item.id)
+          if (next === undefined) return fail('not_found', '没有找到要归档的条目。')
+          affectedIds = [item.id]
+          removedIds = [item.id]
+        } else {
+          next = removeItem(located.text, item)
+          if (next === undefined) return fail('not_found', '没有找到要归档的条目。')
+          const afterItems = eachItem(next)
+          renames = analyzeRewrite(beforeItems, afterItems, item, { start: item.start, end: item.start }).renames
+          const appeared = afterItems.map((entry) => entry.id).filter((entryId) => !beforeItems.some((entry) => entry.id === entryId))
+          affectedIds = [item.id, ...appeared]
+          removedIds = [item.id]
+        }
         const from = relPath(located.path)
         const at = zonedStamp(now(), tz)
         const target = located.target
@@ -615,23 +659,27 @@ export function createStore(options = {}) {
         // Write the archive record first so a crash cannot lose the text.
         const currentArchive = await readOrEmpty(archivePath)
         await writeAtomic(archivePath, appendArchiveRecord(currentArchive, {
-          id,
+          id: item.id,
           file: target,
           from,
           at,
           reason: reason ?? '',
-          tags: item.tags,
+          tags: item.kind === 'entry' ? item.tags : '',
           text: item.text,
         }))
         await writeAtomic(located.path, next)
         return {
           ok: true,
-          id,
+          id: item.id,
+          kind: item.kind,
           target,
           path: located.path,
           archivePath,
           from,
           at,
+          affectedIds,
+          removedIds,
+          ...(renames.length > 0 ? { renames } : {}),
           ...usageOf(target, next),
         }
       })
@@ -647,9 +695,22 @@ export function createStore(options = {}) {
           const targetPath = safeRestorePath(record.from, record.file, record.at)
           if (!targetPath) return fail('bad_record', '归档记录里的原路径不合法，已拒绝恢复。')
           const current = await readOrEmpty(targetPath)
-          const next = appendEntry(current, { id: record.id, tags: record.tags, text: record.text })
+          const isItem = /^[lp]-/u.test(String(record.id))
+          let next
+          let restoredId = record.id
+          if (isItem) {
+            // l- / p- go back as raw bytes; the content-hash id is recomputed.
+            next = appendItem(current, record.text)
+            if (next === current) return fail('bad_record', '归档记录的文本是空的，已拒绝恢复。')
+            const wanted = normalizeItemBody(record.text)
+            // The appended copy is the last occurrence in document order.
+            const matches = eachItem(next).filter((item) => normalizeItemBody(item.text) === wanted)
+            restoredId = matches[matches.length - 1]?.id ?? record.id
+          } else {
+            next = appendEntry(current, { id: record.id, tags: record.tags, text: record.text })
+          }
           if (record.file === 'user' || record.file === 'memory') {
-            const overflow = overLimit(record.file, next, current, [record.id])
+            const overflow = overLimit(record.file, next, current, [record.id, restoredId])
             if (overflow) return overflow
           }
           await writeAtomic(targetPath, next)
@@ -657,6 +718,8 @@ export function createStore(options = {}) {
           return {
             ok: true,
             id: record.id,
+            ...(restoredId !== record.id ? { restoredId } : {}),
+            kind: isItem ? 'item' : 'entry',
             target: record.file,
             path: targetPath,
             archivePath,

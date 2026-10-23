@@ -400,6 +400,20 @@ export function appendEntry(raw, entry) {
   return `${raw}${sep}${block}\n`
 }
 
+/**
+ * Append raw list-item / prose text as its own entry (no dsh-mem markers).
+ * Used by restore() for `l-…` / `p-…` records: the text keeps its original
+ * bytes, and the content-hash id is recomputed from it.
+ */
+export function appendItem(raw, text) {
+  const body = String(text ?? '').replace(/\s+$/u, '')
+  if (body.trim() === '') return String(raw ?? '')
+  const source = String(raw ?? '')
+  if (source.length === 0) return `${body}\n`
+  const sep = source.endsWith('\n') ? '\n' : '\n\n'
+  return `${source}${sep}${body}\n`
+}
+
 export function replaceMarked(raw, id, { text, tags }) {
   const span = findEntrySpan(raw, id)
   if (!span) return undefined

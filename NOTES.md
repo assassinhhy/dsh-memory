@@ -16,6 +16,7 @@
 - 官方 `session-query-sqlite` 出厂是 `openAt: never`，直接包装会搜不到旧 JSONL。插件补丁在后一层把 `openAt` 改成 `first-search`，索引用 `dshHomePath('memory/session-index.sqlite')`。这是文档写明的启用方式，不改上游源码。profile 自己的 patch 若重写该行，以 profile 为准。
 - `session_search` 自己实现与官方工具相同的 cwd 围栏，不依赖默认未挂载的 `@deepseek-ai/dsh-tool-session-query`，避免和实验包抢同一个工具名。
 - 后台 review 听 `session/event` 的 `turn/end`（completed / max-tokens），推迟到 append 之外并吞掉异常。不用 `agent/turn-stopping`，那个钩子抛错会把回合标成失败。
+- **auto-review 的 DELETE 是软删**：模型契约不变（仍输出 `action: DELETE`），但执行时写进 `archive/YYYY-MM.md` 并可 `restore`，绝不硬删；archive 失败就整次失败并记录，不回退到 `remove`。设置页的「删除（不可恢复）」仍是显式硬删（主人点删才算）。
 
 ## 实现取舍（M2，2026-10-22）
 
