@@ -77,6 +77,12 @@ dsh plugin --profile web add "github:assassinhhy/dsh-memory#<commit>&path:/packa
 
 只有 `dsh` 命令、没有 Harness 源码树时，用上面的 `dsh plugin add`，不必跑这个脚本。
 
+### 桌面版与 sharp 版本
+
+桌面版 Harness 自带一份 `sharp`。若某个插件（例如本插件依赖的 `@huggingface/transformers`）捎带了**另一个版本**的 `sharp`，它会先把同名 `libvips-*.dll` 加载进进程；Windows 对同名 DLL 只认第一次加载的那份，于是 Harness 自己那份 `sharp` 缺函数，报 `ERR_DLOPEN_FAILED: The specified procedure could not be found`——图片读写全废（含生成图回传进对话）。
+
+本包用 `"overrides": { "sharp": "0.35.5" }` 把版本对齐到 Harness 自带的那份。**Harness 升级更换 sharp 版本时，这里的 override 要跟着改。**
+
 ### 装好之后
 
 重启 DeepSeek Harness。新开会话才会带上记忆快照。设置 → 记忆 可以确认插件已加载。

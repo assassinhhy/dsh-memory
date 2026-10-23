@@ -1,6 +1,6 @@
 {
   "name": "dsh-memory",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "有界常驻记忆：USER/MEMORY Markdown、日记、FTS5 + 本地 bge-m3，会话开头冻结注入",
   "license": "MIT",
   "type": "module",
@@ -22,6 +22,9 @@
   "dependencies": {
     "@huggingface/transformers": "^3.7.0",
     "undici": "^7.16.0"
+  },
+  "overrides": {
+    "sharp": "0.35.5"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "*",

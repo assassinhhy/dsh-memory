@@ -1,5 +1,12 @@
 # 更新记录
 
+## 0.2.3 — 2026-10-24
+
+### 修复
+
+- **与 Harness 自带的 sharp 版本对齐**：本包依赖的 `@huggingface/transformers` 会捎带旧版 `sharp`（0.34.5）。它比 Harness 先加载，旧版 `libvips` 因此先进进程；Windows 对同名 DLL 只认第一次加载的那份，Harness 自带的 0.35.5 便会缺函数，报 `ERR_DLOPEN_FAILED: The specified procedure could not be found`（表现为图片读写全废，包括生成图回传进对话）。
+- 现在用 `"overrides": { "sharp": "0.35.5" }` 钉到与 Harness 同一版本。**Harness 升级更换 sharp 版本时，这个 override 需要同步调整。**
+
 ## 0.2.2 — 2026-10-24
 
 ### 调整
