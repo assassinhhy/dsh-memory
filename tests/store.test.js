@@ -54,15 +54,15 @@ test('refuses over the character cap without truncating or writing', async () =>
   assert.equal(after, SEED)
 })
 
-test('memory cap is 4000 and user cap is 2000', async () => {
+test('memory cap is 8000 and user cap is 2000', async () => {
   const root = await mkdtemp(join(tmpdir(), 'dsh-memory-cap-'))
   const store = createStore({ root, idFactory: () => 'e-cap01' })
-  const ok = await store.add({ target: 'memory', text: 'a'.repeat(3800) })
+  const ok = await store.add({ target: 'memory', text: 'a'.repeat(LIMITS.memory - 200) })
   assert.equal(ok.ok, true, ok.error)
   const denied = await store.add({ target: 'memory', text: 'b'.repeat(200) })
   assert.equal(denied.ok, false)
   assert.equal(denied.code, 'over_limit')
-  assert.match(denied.error, /4000/)
+  assert.match(denied.error, new RegExp(String(LIMITS.memory)))
   const userDenied = await store.add({ target: 'user', text: 'u'.repeat(2001) })
   assert.equal(userDenied.code, 'over_limit')
   assert.match(userDenied.error, /2000/)

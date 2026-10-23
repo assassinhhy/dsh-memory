@@ -6,7 +6,7 @@ DeepSeek Harness 的有界常驻记忆插件。`USER.md` 与 `MEMORY.md` 在新�
 
 ## 功能
 
-- **常驻记忆**：`USER.md`（画像、偏好、禁忌，2000 字符）与 `MEMORY.md`（环境、约定、踩坑，4000 字符）。超限整次拒绝，不截断。
+- **常驻记忆**：`USER.md`（画像、偏好、禁忌，2000 字符）与 `MEMORY.md`（环境、约定、踩坑，8000 字符）。超限整次拒绝，不截断。
 - **日记**：`journal/YYYY-MM-DD.md`，按 `Asia/Shanghai` 分日。只参与检索。
 - **工具**：写入、按 id 或锚点改删、列出、混合检索、置顶、重建索引、立刻周整理，以及包装官方 `sessionQuery` 的 `session_search`。
 - **回合整理**：默认每 6 个已完成回合，用当前会话的模型决定追加、更新、删除或不动。失败只记日志。
@@ -97,7 +97,7 @@ dsh plugin --profile web add "github:assassinhhy/dsh-memory#<commit>&path:/packa
 | 路径 | 上限 | 作用 |
 |---|---|---|
 | `USER.md` | 2000 字符 | 画像、偏好、禁忌。会话开头冻结注入 |
-| `MEMORY.md` | 4000 字符 | 环境、约定、踩坑。同上 |
+| `MEMORY.md` | 8000 字符 | 环境、约定、踩坑。同上 |
 | `journal/YYYY-MM-DD.md` | 按日不限 | 日记。只检索，不常驻 |
 | `archive/YYYY-MM.md` | 不限 | 归档。可恢复，不是删除 |
 | `review/YYYY-Www.json` 与同名 `.md` | — | 周整理建议。`.json` 是事实来源 |
